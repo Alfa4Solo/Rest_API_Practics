@@ -1,6 +1,6 @@
 package main
 
-import (
+/*import (
 	"github.com/dgrijalva/jwt-go"
 	"github.com/gin-gonic/gin"
 	"net/http"
@@ -43,6 +43,8 @@ func register(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid request"})
 		return
 	}
+	CredentialsList = append(CredentialsList, creds)
+	c.JSON(http.StatusOK, gin.H{"message": "success registration"})
 }
 func login(c *gin.Context) {
 	var creds Credentials
@@ -67,14 +69,16 @@ func login(c *gin.Context) {
 func authMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		tokenString := c.GetHeader("Authorization")
-
+		if tokenString == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"message": "unauthorized"})
+		}
 		claims := &Claims{}
 		token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
 			return jwtKey, nil
 		})
 
 		if err != nil || !token.Valid {
-			c.JSON(http.StatusUnauthorized, gin.H{"message": "unauthorized"})
+			c.JSON(http.StatusUnauthorized, gin.H{"message": "invalid token"})
 			c.Abort()
 			return
 		}
@@ -97,3 +101,4 @@ func main() {
 
 	router.Run(":8080")
 }
+*/

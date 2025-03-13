@@ -28,21 +28,36 @@ type Credentials struct {
 	Password string `json:"password"`
 }
 
-type Claims struct {
-	Username string `json:"username"`
-	jwt.StandardClaims
-}
-
 var CredentialsList = []Credentials{
 	{"John_Doe", "123456"},
 	{"admin", "secret"},
 	{"LimeOnfresh", "CherryBerry101"},
 }
 
-func generateToken(username string) (string, error) {
+type Claims struct {
+	Username string `json:"username"`
+	Type     string `json:"type"`
+	jwt.StandardClaims
+}
+
+func generateAccessToken(username string) (string, error) {
 	expirationTime := time.Now().Add(5 * time.Minute)
 	claims := &Claims{
 		Username: username,
+		Type:     "access",
+		StandardClaims: jwt.StandardClaims{
+			ExpiresAt: expirationTime.Unix(),
+		},
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString(jwtKey)
+}
+
+func generateRefreshToken(username string) (string, error) {
+	expirationTime := time.Now().Add(7 * 24 * time.Hour)
+	claims := &Claims{
+		Username: username,
+		Type:     "refresh",
 		StandardClaims: jwt.StandardClaims{
 			ExpiresAt: expirationTime.Unix(),
 		},
@@ -66,18 +81,60 @@ func login(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid request"})
 		return
 	}
+
 	for _, cred := range CredentialsList {
-		if creds.Username == cred.Username || creds.Password == cred.Password {
-			token, err := generateToken(creds.Username)
+		if creds.Username == cred.Username && creds.Password == cred.Password {
+			accessToken, err := generateAccessToken(creds.Username)
 			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"message": "could not create token"})
+				c.JSON(http.StatusInternalServerError, gin.H{"message": "could not create access token"})
 				return
 			}
-			c.JSON(http.StatusOK, gin.H{"token": token})
+			refreshToken, err := generateRefreshToken(creds.Username)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"message": "could not create refresh token"})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{
+				"access_token":  accessToken,
+				"refresh_token": refreshToken,
+			})
 			return
 		}
 	}
 	c.JSON(http.StatusUnauthorized, gin.H{"message": "unauthorized"})
+}
+
+func refresh(c *gin.Context) {
+	var req struct {
+		RefreshToken string `json:"refresh_token"`
+	}
+	if err := c.BindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid request"})
+		return
+	}
+
+	claims := &Claims{}
+	token, err := jwt.ParseWithClaims(req.RefreshToken, claims, func(token *jwt.Token) (interface{}, error) {
+		return jwtKey, nil
+	})
+
+	if err != nil || !token.Valid || claims.Type != "refresh" {
+		c.JSON(http.StatusUnauthorized, gin.H{"message": "invalid refresh token"})
+		return
+	}
+
+	if time.Now().Unix() > claims.ExpiresAt {
+		c.JSON(http.StatusUnauthorized, gin.H{"message": "refresh token expired"})
+		return
+	}
+
+	newAccessToken, err := generateAccessToken(claims.Username)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to generate access token"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"access_token": newAccessToken})
 }
 
 func authMiddleware() gin.HandlerFunc {
@@ -85,13 +142,16 @@ func authMiddleware() gin.HandlerFunc {
 		tokenString := c.GetHeader("Authorization")
 		if tokenString == "" {
 			c.JSON(http.StatusUnauthorized, gin.H{"message": "unauthorized"})
+			c.Abort()
+			return
 		}
+
 		claims := &Claims{}
 		token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
 			return jwtKey, nil
 		})
 
-		if err != nil || !token.Valid {
+		if err != nil || !token.Valid || claims.Type != "access" {
 			c.JSON(http.StatusUnauthorized, gin.H{"message": "invalid token"})
 			c.Abort()
 			return
@@ -100,11 +160,11 @@ func authMiddleware() gin.HandlerFunc {
 		c.Next()
 	}
 }
-
 func main() {
 	router := gin.Default()
 	router.POST("/register", register)
 	router.POST("/login", login)
+	router.POST("/refresh", refresh) // Добавленный маршрут
 
 	protected := router.Group("/")
 	protected.Use(authMiddleware())
@@ -116,7 +176,6 @@ func main() {
 
 	router.Run(":8080")
 }
-
 func getPC(c *gin.Context) {
 	c.JSON(http.StatusOK, comps)
 }

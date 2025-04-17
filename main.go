@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/gin-gonic/gin"
+	"golang.org/x/time/rate"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"log"
@@ -19,7 +20,7 @@ type dealer struct {
 var db *gorm.DB
 
 func initDB() {
-	dsn := "host=localhost user=postgres password=123456 dbname=postgres port=5432 sslmode=disable"
+	dsn := "host=178.250.158.143 user=alterusr password=bespravni_lox dbname=serverdb port=5432 sslmode=disable"
 	var err error
 	db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
@@ -34,7 +35,7 @@ func getDealers(c *gin.Context) {
 	c.JSON(http.StatusOK, dealers)
 }
 
-func getDealerbyID(c *gin.Context) {
+func getDealerByID(c *gin.Context) {
 	id := c.Param("id")
 	var dealer []dealer
 	if err := db.First(&dealer, id).Error; err != nil {
@@ -61,7 +62,7 @@ func updateDealer(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid request"})
 		return
 	}
-	if err := db.Model(&dealer{}).Where("id = ?", id).Updates(updatedDealer).Error; err != nil {
+	if err := db.Model(&dealer{}).Where("id_dealer = ?", id).Updates(updatedDealer).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"message": "Dealer not found"})
 		return
 	}
@@ -76,16 +77,37 @@ func deleteDealer(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "Computer deleted"})
 }
+
+var limiter = rate.NewLimiter(1, 5)
+
+func rateLimiter(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !limiter.Allow() {
+			http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func main() {
 	initDB()
-	println("Starting server...")
 	router := gin.Default()
+	router.Use(func(c *gin.Context) {
+		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(204)
+			return
+		}
+		c.Next()
+	})
 
-	router.GET("/Dealers", getDealers)
-	router.GET("/Dealers/:id", getDealerbyID)
-	router.POST("/Dealers", createDealer)
-	router.PUT("/Dealers/:id", updateDealer)
-	router.DELETE("/Dealers/:id", deleteDealer)
-
-	router.Run(":8080")
+	router.GET("/dealers", getDealers)
+	router.GET("/dealers/:id", getDealerByID)
+	router.POST("/dealers", createDealer)
+	router.PUT("/dealers/:id", updateDealer)
+	router.DELETE("/dealers/:id", deleteDealer)
+	router.Run(":8090")
 }
